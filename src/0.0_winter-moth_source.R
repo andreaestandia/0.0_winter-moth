@@ -16,6 +16,7 @@ suppressPackageStartupMessages({
   library(janitor)
   library(dplyr)
   library(lubridate)
+  library(wesanderson)
   library(sf)
   library(patchwork)
   library(gghighlight)
