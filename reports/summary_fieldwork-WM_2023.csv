@@ -1,0 +1,14 @@
+species,sex,treatment,n
+winter_moth,f,storage,604
+winter_moth,f,mated,218
+winter_moth,m,mated,83
+winter_moth,m,storage,82
+sm,f,storage,6
+sm,m,storage,2
+scarce_umber,f,storage,22
+scarce_umber,m,storage,4
+red_green_carpet,m,storage,1
+mottled_umber,f,storage,13
+mottled_umber,m,storage,1
+mottled umber/winter_moth,f,storage,1
+feathered_thorn,m,storage,2

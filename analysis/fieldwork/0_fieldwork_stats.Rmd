@@ -1,0 +1,42 @@
+---
+title: "0_fieldwork_stats.Rmd"
+author: "Andrea Estandia"
+date: "13/02/2024"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+# Knitr settings: 
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+options(scipen = 999)
+```
+
+```{r}
+source("./src/0.0_winter-moth_source.R")
+```
+
+Read data
+```{r}
+df <-
+  read_csv(file.path(data_path,
+                     "dfs",
+                     "WM_samples_2023.csv")) %>% 
+  #remove spaces and upper cases in column names
+  janitor::clean_names()
+```
+
+Summary statistics by species, sex, eggs
+```{r}
+summary_df <-df %>% 
+  group_by(species, sex, treatment) %>% 
+  summarise(n=n())
+
+write.csv(summary_df,
+          file.path(reports_path,
+                    "summary_fieldwork-WM_2023.csv"),
+          row.names = F)
+```
+
