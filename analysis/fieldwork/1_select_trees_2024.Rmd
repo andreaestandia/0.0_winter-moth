@@ -1,0 +1,275 @@
+---
+title: "1_select_trees_2024.Rmd"
+author: "Andrea Estandia"
+date: "29/02/2024"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup}
+# Knitr settings: 
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+options(scipen = 999)
+```
+
+```{r}
+source("./src/0.0_winter-moth_source.R")
+```
+
+```{r}
+shape <- 
+  read_sf(dsn = file.path(data_path,
+                                 "wytham_map",
+                                 "perimeter.shp"))
+```
+
+```{r}
+tree <-
+  read_csv(file.path(data_path,
+                     "dfs",
+                     "tree_coordinates.csv")) %>% 
+  #remove spaces and upper cases in column names
+  janitor::clean_names() %>% 
+  select(-area, -plot) %>% 
+  rename(tree_species=species) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = 4326)
+
+tree$geometry <- 
+  st_transform(tree$geometry, 
+               crs=st_crs(shape))
+
+clim <- 
+    read_csv(file.path(data_path,
+                     "dfs",
+                     "microclimate.csv")) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = 4326)
+
+clim$geometry <- 
+  st_transform(clim$geometry, 
+               crs=st_crs(shape))
+
+budburst_raw <- read_csv(file.path(data_path,
+                     "dfs",
+                     "oak_budburst_2013_2014.csv")) %>% 
+  mutate(across(starts_with("bb_date"), as.numeric)) %>%
+  mutate(mean_bb_date = rowMeans(select(., starts_with("bb_date")), na.rm = TRUE)) 
+
+budburst <- read_csv(file.path(data_path,
+                     "dfs",
+                     "oak_budburst_2013_2014.csv")) %>% 
+  mutate(across(starts_with("bb_date"), as.numeric)) %>%
+  mutate(mean_bb_date = rowMeans(select(., starts_with("bb_date")), na.rm = TRUE)) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = st_crs(shape))
+```
+
+```{r}
+budburst %>% 
+  ggplot(aes(x=bb_date_2013, y=bb_date_2014))+
+  geom_point()
+```
+
+```{r}
+# Create a distance matrix
+dist_matrix <- st_distance(budburst)# %>% 
+  drop_units()
+
+  
+rownames(budburst) <- budburst$tree
+# Function to calculate mean bb_date for each pair of trees
+calculate_mean_diff <- function(df, distance_threshold) {
+  result1 <- df %>%
+    st_distance() %>%
+    as.matrix() 
+  
+    rownames(result1) <- df$tree
+    colnames(result1) <- df$tree
+    
+    result <- result1 %>% 
+    as.data.frame() %>%
+    rownames_to_column("tree1") %>%
+    gather(key = "tree2", value = "distance", -tree1) %>%
+    drop_units() %>% 
+    filter(distance <= distance_threshold) %>%
+    inner_join(budburst, by = c("tree2" = "tree")) %>%
+    inner_join(budburst, by = c("tree1" = "tree")) %>%
+    group_by(tree1, tree2) %>%
+    summarize(mean_diff = abs(mean_bb_date.x - mean_bb_date.y)) %>% 
+    filter(tree1 != tree2)
+
+  return(result)
+}
+
+# Specify distance thresholds (you can adjust these)
+close_distance_threshold <- 60  # Adjust this distance
+medium_distance_threshold <- 80  # Adjust this distance
+
+# Calculate mean differences for close and medium-distance categories
+close_distance_result <- calculate_mean_diff(budburst, close_distance_threshold)
+medium_distance_result <- calculate_mean_diff(budburst, medium_distance_threshold)
+
+threshold_similar = 4
+threshold_dissimilar = 8
+# Filter pairs with similar and dissimilar mean bb_date
+similar_pairs <- close_distance_result %>%
+  filter(mean_diff <= threshold_similar) %>% 
+  rename(tree=tree1) %>% 
+  left_join(budburst_raw) %>% 
+  select(tree,
+         tree2, 
+         mean_diff,
+         x,
+         y) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = st_crs(shape))
+
+
+dissimilar_pairs <- close_distance_result %>%
+  filter(mean_diff >= threshold_dissimilar) %>% 
+  rename(tree=tree1) %>% 
+  left_join(budburst_raw) %>% 
+  select(tree,
+         tree2, 
+         mean_diff,
+         x,
+         y) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = st_crs(shape))
+
+threshold_similar_medium = 4
+threshold_dissimilar_medium = 8
+
+similar_pairs_medium <- medium_distance_result %>%
+  filter(mean_diff <= threshold_similar_medium) %>% 
+  rename(tree=tree1) %>% 
+  left_join(budburst_raw) %>% 
+  select(tree,
+         tree2, 
+         mean_diff,
+         x,
+         y) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = st_crs(shape))
+
+dissimilar_pairs_medium <- medium_distance_result %>%
+  filter(mean_diff > threshold_dissimilar_medium) %>% 
+  rename(tree=tree1) %>% 
+  left_join(budburst_raw) %>% 
+  select(tree,
+         tree2, 
+         mean_diff,
+         x,
+         y) %>% 
+  st_as_sf(., coords = c("x", "y"), 
+                 crs = st_crs(shape))
+
+# Print or use the similar_pairs and dissimilar_pairs as needed
+print(similar_pairs)
+print(dissimilar_pairs)
+
+```
+
+
+```{r}
+pal <- wesanderson::wes_palette("Zissou1", 100, type = "continuous")
+
+p1 = ggplot() +
+  geom_sf(data = shape, fill = "lightgrey", color = "lightgrey", size = 0) +
+  geom_sf(data = similar_pairs, aes(color = mean_diff), size = 2) +
+  theme_minimal() +
+    labs(title = NULL, subtitle = NULL) +
+    scale_color_gradientn(colours = pal) +
+    theme_minimal() +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(colour = "black"),
+      text = element_text(family = "Calibri"),
+      axis.title = element_text(family = "Calibri"),
+      legend.position = "bottom"
+    )+
+  labs(title="Nearby with similar budburst dates (<60 m | <4 days)")
+
+p2=ggplot() +
+  geom_sf(data = shape, fill = "lightgrey", color = "lightgrey", size = 0) +
+  geom_sf(data = dissimilar_pairs, aes(color = mean_diff), size = 2) +
+  theme_minimal() +
+  scale_color_gradientn(colours=pal) +
+    labs(title = NULL, subtitle = NULL) +
+    theme_minimal() +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(colour = "black"),
+      text = element_text(family = "Calibri"),
+      axis.title = element_text(family = "Calibri"),
+      legend.position = "bottom"
+    )+
+  labs(title="Nearby with dissimilar budburst dates (<60 m | >8 days)")
+
+p3 = ggplot() +
+  geom_sf(data = shape, fill = "lightgrey", color = "lightgrey", size = 0) +
+  geom_sf(data = similar_pairs_medium, aes(color = mean_diff), size = 2) +
+  theme_minimal() +
+  scale_color_gradientn(colours=pal) +
+    labs(title = NULL, subtitle = NULL) +
+    theme_minimal() +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(colour = "black"),
+      text = element_text(family = "Calibri"),
+      axis.title = element_text(family = "Calibri"),
+      legend.position = "bottom"
+    )+
+  labs(title="Far with similar budburst dates (<80 m | <4 days)")
+
+p4=ggplot() +
+  geom_sf(data = shape, fill = "lightgrey", color = "lightgrey", size = 0) +
+  geom_sf(data = dissimilar_pairs_medium, aes(color = mean_diff), size = 2) +
+  theme_minimal() +
+  scale_color_gradientn(colours=pal) +
+    labs(title = NULL, subtitle = NULL) +
+    theme_minimal() +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(colour = "black"),
+      text = element_text(family = "Calibri"),
+      axis.title = element_text(family = "Calibri"),
+      legend.position = "bottom"
+    )+
+  labs(title="Far with dissimilar budburst dates (<80 m | >8 days)")
+
+(p1+p2)/(p3+p4)
+p1/p3
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = shape, fill = "lightgrey", color = "lightgrey", size = 0) +
+  geom_sf(data = budburst, aes(color = mean_bb_date), size = 2) +
+  theme_minimal() +
+  scale_color_gradientn(colours=pal) +
+    labs(title = NULL, subtitle = NULL) +
+    theme_minimal() +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(colour = "black"),
+      text = element_text(family = "Calibri"),
+      axis.title = element_text(family = "Calibri"),
+      legend.position = "bottom"
+    )+
+  labs(title="Nearby with dissimilar budburst dates (<80 m | >8 days)")
+```
+
